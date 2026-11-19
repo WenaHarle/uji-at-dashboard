@@ -198,3 +198,15 @@ table.tt { width: 100%; border-collapse: collapse; background: var(--card); bord
 .glist div { display: flex; gap: 8px; padding: 2px 0; }
 .glist .on { color: var(--primary); }
 .mt { margin-top: 14px; }
+
+/* parameter uji & jalankan semua */
+.params summary { display: flex; gap: 10px; align-items: baseline; cursor: pointer; list-style: none; flex-wrap: wrap; }
+.params summary::-webkit-details-marker { display: none; }
+.params summary h3 { margin: 0; }
+.params summary::before { content: "▸"; color: var(--primary); }
+.params[open] summary::before { content: "▾"; }
+.pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin: 12px 0; }
+.runall { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 10px 14px; }
+.badge.human { color: var(--amber); border-color: color-mix(in oklch, var(--amber) 50%, transparent); }
+.badge.long { color: var(--muted-foreground); }
+.req { font: 11px var(--font-mono); color: var(--muted-foreground); margin-top: 4px; }

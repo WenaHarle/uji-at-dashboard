@@ -13,7 +13,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import mqtt from 'mqtt';
-import { TESTS, SECTIONS } from './tests.js';
+import { TESTS, SECTIONS, CATALOG_VERSION } from './tests.js';
 
 // Server di Indonesia -> host Eropa sering > 250 ms; bawaan "happy eyeballs" Node terlalu cepat menyerah.
 dns.setDefaultResultOrder('ipv4first');
@@ -66,6 +66,11 @@ const rid = (n) => crypto.randomBytes(n).toString('hex');
 const randPass = (n = 14) => crypto.randomBytes(24).toString('base64').replace(/[^A-Za-z0-9]/g, '').slice(0, n);
 
 // ---------------------------------------------------------------- pengguna
+// Parameter uji yang bisa diubah pengguna (dipakai placeholder di perintah AT)
+const PARAM_KEYS = ['ssid', 'wifiPass', 'btName', 'btPin', 'apSsid', 'apPass', 'apCh', 'bleName', 'mdnsName'];
+function defaultParams() {
+  return { ssid: '', wifiPass: '', btName: 'ESP-AT-TEST', btPin: '1234', apSsid: 'ESP-AT-TEST', apPass: 'esp-at-12345', apCh: 6, bleName: 'ESP-AT-BLE', mdnsName: 'esp-at', autoWifi: true };
+}
 function defaultCustom() {
   return { status: 200, contentType: 'text/plain', headers: '', body: 'UJIAT CUSTOM', delayMs: 0 };
 }
@@ -89,10 +94,11 @@ function makeUser(kind, uid, extra = {}) {
     secret: extra.secret || rid(8),
     mqttUser: extra.mqttUser || `u-${uid}`,
     mqttPass: extra.mqttPass || randPass(),
-    settings: { ssid: '', wifiPass: '', otaFile: '', otaAbortPct: 0, custom: defaultCustom(), ...(extra.settings || {}) },
+    settings: { ...defaultParams(), otaFile: '', otaAbortPct: 0, custom: defaultCustom(), ...(extra.settings || {}) },
     ...newRunSet(kind === 'admin'),
     certs: {},
     lastCertAt: 0,
+    catalog: CATALOG_VERSION,
   };
 }
 
@@ -102,7 +108,8 @@ let disk;
 try { disk = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { disk = {}; }
 let admin;
 if (disk.admin) {
-  admin = { ...makeUser('admin', disk.admin.uid), ...disk.admin, certs: {}, lastCertAt: 0 };
+  // catalog diambil dari disk (bukan bawaan makeUser) supaya migrasi katalog terdeteksi
+  admin = { ...makeUser('admin', disk.admin.uid), ...disk.admin, catalog: disk.admin.catalog, certs: {}, lastCertAt: 0 };
   admin.settings = { ...makeUser('admin', 'x').settings, ...disk.admin.settings };
 } else {
   // migrasi dari format lama (satu pengguna)
@@ -112,6 +119,15 @@ if (disk.admin) {
     admin.settings = { ...admin.settings, ssid: old.ssid, wifiPass: old.wifiPass, otaFile: old.otaFile, otaAbortPct: old.otaAbortPct, custom: old.custom || defaultCustom() };
   }
   if (disk.runs) { admin.runs = disk.runs; admin.currentRun = disk.currentRun; admin.results = disk.results; }
+}
+if (admin.catalog !== CATALOG_VERSION) {
+  // ID uji berubah arti: hasil lama tetap disimpan, tapi putaran aktif dimulai baru
+  for (const r of admin.runs) if (!/katalog lama/.test(r.name)) r.name += ' (katalog lama)';
+  const id = 'r' + Date.now().toString(36);
+  admin.runs.push({ id, name: `Putaran ${admin.runs.length + 1} (katalog v${CATALOG_VERSION})`, created: Date.now() });
+  admin.results[id] = {};
+  admin.currentRun = id;
+  admin.catalog = CATALOG_VERSION;
 }
 admin.mqttUser = env.MQTT_DEVICE_USER || 'esp32';
 admin.mqttPass = env.MQTT_DEVICE_PASS || admin.mqttPass;
@@ -526,8 +542,9 @@ for (const [key, b] of Object.entries(brokers)) {
       const line = payload.toString();
       if (/ujiat-dash-/.test(line)) return;
       if (!/New client|disconnect|Client .* closed|connected|Socket error|not authori[sz]ed|bad user|denied/i.test(line)) return;
-      const m = line.match(/u'u-([0-9a-f]{6})'|\bu-([0-9a-f]{6})\b/);
-      const uid = m ? (m[1] || m[2]) : (/u'([^']+)'/.exec(line)?.[1] === admin.mqttUser ? admin.uid : null);
+      // Atribusi: username u-<id>, client id ujiat-<id>/esp32-<id>, atau akun ESP admin
+      const m = line.match(/u'u-([0-9a-f]{6})'|\bu-([0-9a-f]{6})\b|\b(?:ujiat|esp32)-([0-9a-f]{6})\b/);
+      const uid = m ? (m[1] || m[2] || m[3]) : (/u'([^']+)'/.exec(line)?.[1] === admin.mqttUser ? admin.uid : null);
       emit('mqttlog', short(line, 240), {}, uid && users.has(uid) ? uid : null);
       return;
     }
@@ -664,12 +681,20 @@ function resolveFor(u, s) {
     .replaceAll('{MQTT_PASS}', '<mqtt-pass>')
     .replaceAll('{SSID}', u.settings.ssid || '<ssid>')
     .replaceAll('{PASS}', '<password>')
+    .replaceAll('{BT_NAME}', u.settings.btName)
+    .replaceAll('{BT_PIN}', u.settings.btPin)
+    .replaceAll('{AP_SSID}', u.settings.apSsid)
+    .replaceAll('{AP_PASS}', u.settings.apPass)
+    .replaceAll('{AP_CH}', String(u.settings.apCh))
+    .replaceAll('{BLE_NAME}', u.settings.bleName)
+    .replaceAll('{MDNS}', u.settings.mdnsName)
     .replaceAll('{OTA_FILE}', u.settings.otaFile || '<file>.bin');
 }
 function displayCmd(u, tc) {
   if (!tc.run) return resolveFor(u, tc.cmd);
   return tc.run.split('\n').map((l) => l.replace(/\s;t=\d+$/, '')).map((l) => {
-    if (l.startsWith('>>')) return '» ' + resolveFor(u, l.replace(/^>>!?\s?/, '')).replace(/\{FILL:(\d+)(?::\d+)?\}/g, '‹$1 byte pola›').replace(/\{PEM:(\w+)\}/g, '‹PEM $1›');
+    if (l.startsWith('- ')) return `[persiapan] ${resolveFor(u, l.slice(2))}`;
+    if (l.startsWith('>>')) return '» ' + resolveFor(u, l.replace(/^>>!?\s?/, '')).replace(/\{FILL:(\d+)(?::\d+)?\}/g, '‹$1 byte pola›').replace(/\{ZERO:(\d+)\}/g, '‹$1 byte nol›').replace(/\{PEMZ?:(\w+)\}/g, '‹PEM $1›');
     if (l.startsWith('??')) return `[tunggu: ${l.slice(2).trim()}]`;
     if (l.startsWith('?ev')) return `[bukti server: ${resolveFor(u, l.slice(3).trim())}]`;
     if (l.startsWith('~')) return `[jeda ${l.slice(1).trim()} ms]`;
@@ -789,7 +814,9 @@ async function handleApi(req, res, url, u) {
   if (p === '/api/settings' && M === 'POST') {
     const b = await readJson(req);
     const s = u.settings;
-    for (const k of ['ssid', 'wifiPass', 'otaFile']) if (k in b) s[k] = String(b[k]).slice(0, 128);
+    for (const k of [...PARAM_KEYS, 'otaFile']) if (k in b) s[k] = String(b[k]).slice(0, 64);
+    if ('apCh' in b) s.apCh = Math.max(1, Math.min(13, Number(b.apCh) || 6));
+    if ('autoWifi' in b) s.autoWifi = !!b.autoWifi;
     if ('otaAbortPct' in b) s.otaAbortPct = Math.max(0, Math.min(99, Number(b.otaAbortPct) || 0));
     if (b.custom) s.custom = { ...s.custom, ...b.custom, body: String(b.custom.body ?? s.custom.body).slice(0, 8192) };
     if ('testMode' in b) {
@@ -804,7 +831,7 @@ async function handleApi(req, res, url, u) {
     const b = await readJson(req);
     if (!TESTS.find((x) => x.id === b.id)) return send(res, 400, { error: 'id tidak dikenal' });
     const r = (u.results[u.currentRun] ||= {});
-    r[b.id] = { ...(r[b.id] || {}), ...(b.status !== undefined && { status: String(b.status).slice(0, 20) }), ...(b.actual !== undefined && { actual: String(b.actual).slice(0, 8000) }), at: Date.now() };
+    r[b.id] = { ...(r[b.id] || {}), ...(b.status !== undefined && { status: String(b.status).slice(0, 20) }), ...(b.actual !== undefined && { actual: String(b.actual).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '·').slice(0, 8000) }), at: Date.now() };
     touched(u);
     return send(res, 200, { ok: true, result: r[b.id] });
   }
@@ -1048,9 +1075,10 @@ server.on('upgrade', (req, socket, head) => {
       up.write(hd + '\r\n');
       if (head && head.length) up.write(head);
       socket.pipe(up).pipe(socket);
+      emit('mqttws', `koneksi WebSocket MQTT dibuka dari ${ip}`); // hanya terlihat admin (diagnosis)
     });
     up.on('error', () => socket.destroy());
-    socket.on('close', () => up.destroy());
+    socket.on('close', () => { up.destroy(); emit('mqttws', `koneksi WebSocket MQTT ditutup (${ip})`); });
     return;
   }
   socket.destroy();

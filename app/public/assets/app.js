@@ -46,70 +46,23 @@ async function copy(text) {
 }
 
 // ------------------------------------------------------------------ placeholder
+const UR = window.UjiRunner;
 function ctx() {
+  const st = S.settings;
   return {
-    HOST: S.host,
-    T: '/t/' + S.user.uid,
-    WS: '/ws/' + S.user.uid,
-    SSID: S.settings.ssid || '<ssid>',
-    PASS: S.settings.wifiPass || '<password>',
-    MQTT_USER: S.mqttUser,
-    MQTT_PASS: S.mqttPass,
-    TOPIC: S.topic,
-    TOPIC_ID: S.user.uid,
-    OTA_FILE: S.settings.otaFile || '<file>.bin',
+    HOST: S.host, T: '/t/' + S.user.uid, WS: '/ws/' + S.user.uid,
+    SSID: st.ssid || '<ssid>', PASS: st.wifiPass || '',
+    MQTT_USER: S.mqttUser, MQTT_PASS: S.mqttPass, TOPIC: S.topic, TOPIC_ID: S.user.uid,
+    OTA_FILE: st.otaFile || '<file>.bin', OTA_FILE_SET: !!st.otaFile,
+    BT_NAME: st.btName, BT_PIN: st.btPin, AP_SSID: st.apSsid, AP_PASS: st.apPass, AP_CH: st.apCh,
+    BLE_NAME: st.bleName, MDNS: st.mdnsName,
   };
 }
-function resolvePh(s) {
-  const c = ctx();
-  return String(s).replace(/\{(HOST|T|WS|SSID|PASS|MQTT_USER|MQTT_PASS|TOPIC_ID|TOPIC|OTA_FILE)\}/g, (_, k) => c[k]);
-}
-function unescapeRaw(s) {
-  return s.replace(/\\(r|n|t|0|\\)/g, (_, c) => ({ r: '\r', n: '\n', t: '\t', 0: '\0', '\\': '\\' })[c]);
-}
-const PAT = '0123456789abcdefghijklmnopqrstuvwxyz';
-function fill(n, off = 0) { let s = ''; for (let i = 0; i < n; i++) s += PAT[(off + i) % PAT.length]; return s; }
-function payloadBytes(raw) {
-  let s = unescapeRaw(resolvePh(raw));
-  s = s.replace(/\{FILL:(\d+)(?::(\d+))?\}/g, (_, n, o) => fill(Number(n), Number(o || 0)));
-  s = s.replace(/\{PEM:([a-z_]+)\}/g, (_, k) => {
-    if (!certs[k]) throw new Error(`Sertifikat "${k}" belum tersedia (lihat tab Sertifikat)`);
-    return certs[k];
-  });
-  return enc.encode(s);
-}
-function splitTimeout(line) {
-  const m = line.match(/^(.*?)\s;t=(\d+)\s*$/);
-  return m ? [m[1], Number(m[2])] : [line, null];
-}
-function nextPayloadLine(lines, i) {
-  for (let j = i + 1; j < lines.length; j++) {
-    const l = lines[j];
-    if (l.startsWith('>>')) return l.replace(/^>>!?\s?/, '');
-    if (/^AT/i.test(l)) return null;
-  }
-  return null;
-}
-function expandLoops(lines) {
-  const out = [];
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^@loop\s+(\d+)/);
-    if (!m) { out.push(lines[i]); continue; }
-    let depth = 1, j = i + 1;
-    for (; j < lines.length; j++) {
-      if (/^@loop/.test(lines[j])) depth++;
-      if (/^@end/.test(lines[j]) && --depth === 0) break;
-    }
-    const body = expandLoops(lines.slice(i + 1, j));
-    for (let k = 0; k < Number(m[1]); k++) out.push(...body);
-    i = j;
-  }
-  return out;
-}
+const resolvePh = (str) => UR.resolve(str, ctx(), 'raw');
 function lenFor(lines, i) {
-  const p = nextPayloadLine(lines, i);
+  const p = UR.nextPayloadLine(lines, i);
   if (p == null) return '?';
-  try { return payloadBytes(p).length; } catch { return '?'; }
+  try { return UR.toBytes(UR.payloadString(p, ctx(), certs)).length; } catch { return '?'; }
 }
 // Tampilan perintah (untuk dibaca / disalin manual)
 function renderCmd(tc) {
@@ -117,16 +70,21 @@ function renderCmd(tc) {
   const lines = tc.run.split('\n');
   const out = [];
   lines.forEach((raw, i) => {
-    const [line] = splitTimeout(raw);
+    let [line] = UR.splitTimeout(raw);
     let el;
-    if (line.startsWith('>>')) {
+    if (line.startsWith('- ')) {
+      el = h('span', { class: 'c-meta' }, `[persiapan] ${resolvePh(line.slice(2)).replace('{LEN}', lenFor(lines, i))}`);
+    } else if (line.startsWith('>>')) {
       let p = resolvePh(line.replace(/^>>!?\s?/, ''));
       p = p.replace(/\{FILL:(\d+)(?::(\d+))?\}/g, (_, n, o) => `‹${n} byte pola${o ? ' mulai ' + o : ''}›`);
-      p = p.replace(/\{PEM:([a-z_]+)\}/g, (_, k) => `‹PEM ${k}${certs[k] ? ', ' + enc.encode(certs[k]).length + ' byte' : ''}›`);
+      p = p.replace(/\{ZERO:(\d+)\}/g, (_, n) => `‹${n} byte nol›`);
+      p = p.replace(/\{PEMZ?:([a-z_]+)\}/g, (_, k) => `‹PEM ${k}${certs[k] ? ', ' + UR.toBytes(certs[k]).length + ' byte' : ' (belum ada)'}›`);
       el = h('span', { class: 'c-raw' }, (line.startsWith('>>!') ? '» (langsung) ' : '» ') + p);
-    } else if (line.startsWith('??')) el = h('span', { class: 'c-meta' }, `[tunggu serial: ${line.slice(2).trim()}]`);
-    else if (line.startsWith('?ev')) el = h('span', { class: 'c-meta' }, `[bukti server: ${line.slice(3).trim()}]`);
+    } else if (line.startsWith('??')) el = h('span', { class: 'c-meta' }, `[tunggu serial: ${resolvePh(line.slice(2).trim())}]`);
+    else if (line.startsWith('?ev')) el = h('span', { class: 'c-meta' }, `[bukti server: ${resolvePh(line.slice(3).trim())}]`);
     else if (line.startsWith('~')) el = h('span', { class: 'c-meta' }, `[jeda ${line.slice(1).trim()} ms]`);
+    else if (line === '!wifi') el = h('span', { class: 'c-meta' }, '[pastikan Wi-Fi tersambung]');
+    else if (line === '!net') el = h('span', { class: 'c-meta' }, '[pastikan internet tersedia]');
     else if (line.startsWith('!')) el = h('span', { class: 'c-meta' }, `[dashboard: ${resolvePh(line.slice(1))}]`);
     else if (line.startsWith('@loop')) el = h('span', { class: 'c-meta' }, `[ulangi ${line.split(/\s+/)[1]}x:]`);
     else if (line.startsWith('@end')) el = h('span', { class: 'c-meta' }, '[akhir ulang]');
@@ -136,7 +94,8 @@ function renderCmd(tc) {
   out.pop();
   return out;
 }
-const isServerTest = (tc) => /\{HOST\}|\{T\}|test\.mosquitto|emqx|tcpbin|SNTP|CIPDOMAIN|PING|SYSMFG|USEROTA|\/t\/|\/ws|\/mqtt/.test(tc.run || tc.cmd) || ['S', 'M', 'P', 'K', 'O', 'U'].includes(tc.id[0]);
+const isServerTest = (tc) => !!tc.needs || /\{HOST\}|\{T\}|test\.mosquitto|emqx|tcpbin/.test(tc.run || tc.cmd || '');
+const testById = (id) => S.tests.find((x) => x.id === id);
 
 // ------------------------------------------------------------------ Web Serial
 const serial = {
@@ -219,149 +178,52 @@ const logTx = (t) => appendLog(t, 'tx');
 const logSys = (t, cls = 'sys') => appendLog(`\n# ${t}\n`, cls);
 
 // ------------------------------------------------------------------ runner
-const runner = { busy: false, abort: false };
 function setRunner(text) {
   $('#runner').hidden = !text;
   $('#runnerText').textContent = text || '';
 }
-async function waitSerial(re, timeout, from) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    if (runner.abort) throw new Error('Dihentikan');
-    const m = serial.rx.slice(from).match(re);
-    if (m) return m;
-    await sleep(25);
-  }
-  return null;
-}
-async function waitEvent(re, timeout, sinceId) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    if (runner.abort) throw new Error('Dihentikan');
-    const ev = events.find((e) => e.id > sinceId && re.test(e.summary));
-    if (ev) return ev;
-    await sleep(100);
-  }
-  return null;
-}
-async function doAction(line) {
-  const [cmd, ...rest] = resolvePh(line.slice(1)).split(' ');
-  const arg = rest.join(' ');
-  if (cmd === 'hold-push') return api('/api/ctl/hold/push', { method: 'POST', body: { text: arg } });
-  if (cmd === 'hold-close') return api('/api/ctl/hold/close', { method: 'POST', body: {} });
-  if (cmd === 'ws-push') return api('/api/ctl/ws/push', { method: 'POST', body: { text: arg } });
-  if (cmd === 'ws-close') return api('/api/ctl/ws/close', { method: 'POST', body: {} });
-  if (cmd === 'mqtt-pub') {
-    const [broker, topic, ...p] = rest;
+async function doAction(name, args) {
+  const text = args.join(' ');
+  if (name === 'hold-push') return api('/api/ctl/hold/push', { method: 'POST', body: { text } });
+  if (name === 'hold-close') return api('/api/ctl/hold/close', { method: 'POST', body: {} });
+  if (name === 'ws-push') return api('/api/ctl/ws/push', { method: 'POST', body: { text } });
+  if (name === 'ws-close') return api('/api/ctl/ws/close', { method: 'POST', body: {} });
+  if (name === 'mqtt-pub') {
+    const [broker, topic, ...p] = args;
     return api('/api/mqtt/publish', { method: 'POST', body: { broker, topic, payload: p.join(' '), qos: 1 } });
   }
-  throw new Error('Aksi tidak dikenal: ' + cmd);
+  throw new Error('Aksi tidak dikenal: ' + name);
 }
-const RE_DONE = /(?:^|\n)(OK|ERROR|FAIL|SEND OK|SEND FAIL)\r?\n|busy p/;
-const RE_PROMPT = /(?:^|\n)>|(?:^|\n)(ERROR|FAIL)\r?\n|busy p/;
-const RE_AFTER_RAW = /SEND OK|SEND FAIL|\+MQTTPUB:(OK|FAIL)|(?:^|\n)(OK|ERROR|FAIL)\r?\n/;
-function defaultTimeout(line) {
-  if (/CWJAP=/.test(line)) return 25000;
-  if (/CIPSTART|MQTTCONN=|HTTPC|WSOPEN|USEROTA|CIPDOMAIN/.test(line)) return 25000;
-  if (/AT\+RST|GSLP|RESTORE/.test(line)) return 5000;
-  return 10000;
-}
-async function runTest(tc) {
-  if (!tc.run) throw new Error('Tes ini manual');
-  if (!serial.connected) throw new Error('Hubungkan serial dulu');
-  const lines = expandLoops(tc.run.split('\n').map((l) => l.trimEnd()).filter((l) => l && !l.startsWith('#')));
-  const start = serial.rx.length;
-  const evStart = lastEventId;
-  const notes = [];
-  let failed = false, from = start;
-  logSys(`▶ ${tc.id} ${tc.name}`);
-  for (let i = 0; i < lines.length && !failed; i++) {
-    const [line, to] = splitTimeout(lines[i]);
-    setRunner(`${tc.id}  ${i + 1}/${lines.length}  ${line.slice(0, 60)}`);
-    if (line.startsWith('~')) { await sleep(Number(line.slice(1)) || 0); continue; }
-    if (line.startsWith('?ev')) {
-      const re = new RegExp(resolvePh(line.slice(3).trim()), 'i');
-      const ev = await waitEvent(re, to || 20000, evStart);
-      if (ev) notes.push(`server: ${ev.summary}`);
-      else { failed = true; notes.push(`TIDAK ada bukti server untuk /${re.source}/`); }
-      continue;
-    }
-    if (line.startsWith('??')) {
-      const re = new RegExp(resolvePh(line.slice(2).trim()));
-      if (!(await waitSerial(re, to || 15000, from))) { failed = true; notes.push(`TIMEOUT menunggu /${re.source}/`); }
-      continue;
-    }
-    if (line.startsWith('!')) {
-      from = serial.rx.length;
-      try { const r = await doAction(line); notes.push(`dashboard ${line.slice(1).split(' ')[0]} → ${r.count ?? 'ok'}`); }
-      catch (e) { failed = true; notes.push('aksi gagal: ' + e.message); }
-      continue;
-    }
-    if (line.startsWith('>>')) {
-      const noWait = line.startsWith('>>!');
-      const bytes = payloadBytes(line.replace(/^>>!?\s?/, ''));
-      from = serial.rx.length;
-      await serial.sendRaw(bytes);
-      if (!noWait && !(await waitSerial(RE_AFTER_RAW, to || 15000, from))) { failed = true; notes.push('TIMEOUT setelah kirim data'); }
-      continue;
-    }
-    // perintah AT
-    let cmd = resolvePh(line);
-    if (cmd.includes('{LEN}')) {
-      const p = nextPayloadLine(lines, i);
-      cmd = cmd.replace('{LEN}', String(payloadBytes(p).length));
-    }
-    const wantPrompt = (lines[i + 1] || '').startsWith('>>');
-    let m = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      await sleep(40); // beri jeda kecil supaya ESP siap menerima perintah berikutnya
-      from = serial.rx.length;
-      await serial.sendLine(cmd);
-      m = await waitSerial(wantPrompt ? RE_PROMPT : RE_DONE, to || defaultTimeout(cmd), from);
-      if (!m || !/busy/.test(m[0])) break;
-      notes.push(`ESP sibuk (busy), kirim ulang: ${cmd.slice(0, 60)}`);
-      await waitSerial(/(?:^|\n)(OK|ERROR)\r?\n/, 3000, from); // tunggu perintah sebelumnya selesai
-    }
-    if (!m) { failed = true; notes.push(`TIMEOUT menunggu OK/ERROR: ${cmd.slice(0, 80)}`); }
-    else if (/busy/.test(m[0])) { failed = true; notes.push(`ESP tetap sibuk: ${cmd.slice(0, 80)}`); }
-    else if (wantPrompt && /ERROR|FAIL/.test(m[0])) { failed = true; notes.push(`Tidak dapat prompt '>' untuk: ${cmd.slice(0, 80)}`); }
-  }
-  await sleep(300); // tangkap sisa keluaran yang masih mengalir
-  const rawOut = serial.rx.slice(start);
-  const out = rawOut.replace(/\r/g, '');
-  let expectOk = true;
-  if (tc.expect) {
-    const re = new RegExp(resolvePh(tc.expect));
-    // cocokkan dengan keluaran asli (ada \r) maupun yang sudah dinormalkan
-    expectOk = re.test(rawOut) || re.test(out);
-    if (!expectOk) notes.push(`Pola hasil tidak cocok: /${resolvePh(tc.expect)}/`);
-  }
-  const pass = !failed && expectOk;
-  const actual = [pass ? 'OTOMATIS: LULUS' : 'OTOMATIS: GAGAL', ...notes, '---', out.length > 1500 ? '…' + out.slice(-1500) : out].join('\n');
-  logSys(`${pass ? '✔' : '✘'} ${tc.id} ${pass ? 'Lulus' : 'Gagal'}${notes.length ? ' · ' + notes.filter((n) => /TIMEOUT|TIDAK|gagal|Pola|sibuk/i.test(n)).join('; ') : ''}`, pass ? 'ok' : 'bad');
-  await saveResult(tc.id, { status: pass ? 'Lulus' : 'Gagal', actual });
-  return pass;
-}
-async function runMany(list) {
+const runner = UR.createRunner({
+  write: (b) => serial.write(b),
+  rx: () => serial.rx,
+  ctx,
+  certs: () => certs,
+  action: doAction,
+  findEvent: (re, since) => events.find((e) => e.id > since && re.test(e.summary)),
+  lastEventId: () => lastEventId,
+  status: (id) => S.results[id]?.status || 'Belum diuji',
+  save: (id, patch) => saveResult(id, patch),
+  log: (kind, text) => (kind === 'tx' ? logTx(text) : logSys(text, kind)),
+  progress: setRunner,
+  settings: () => S.settings,
+});
+async function runList(list, single = false) {
   if (runner.busy) return toast('Runner sedang berjalan', true);
-  if (!serial.connected) return toast('Hubungkan serial ESP dulu (panel kanan)', true);
-  runner.busy = true; runner.abort = false;
-  let ok = 0, bad = 0;
-  try {
-    for (const tc of list) {
-      if (runner.abort) break;
-      const row = $(`tr[data-id="${tc.id}"]`);
-      row?.classList.add('running');
-      row?.scrollIntoView({ block: 'nearest' });
-      try { (await runTest(tc)) ? ok++ : bad++; }
-      catch (e) { bad++; logSys(`${tc.id}: ${e.message}`, 'bad'); if (e.message === 'Dihentikan') break; }
-      row?.classList.remove('running');
-    }
-  } finally {
-    runner.busy = false;
-    setRunner('');
-    toast(`Selesai: ${ok} lulus, ${bad} gagal`);
+  if (!serial.connected) return toast('Hubungkan ESP dulu (panel kanan → Hubungkan)', true);
+  if (S.settings.autoWifi !== false && !S.settings.ssid && list.some((tc) => tc.needs)) {
+    toast('SSID Wi-Fi belum diisi di Parameter uji: uji yang butuh internet akan gagal prasyarat', true);
   }
+  const hooks = {
+    onStart: (tc) => { const row = $(`tr[data-id="${tc.id}"]`); row?.classList.add('running'); row?.scrollIntoView({ block: 'nearest' }); },
+    onEnd: (tc) => $(`tr[data-id="${tc.id}"]`)?.classList.remove('running'),
+  };
+  try {
+    const sum = single
+      ? await runner.runTest(list[0], hooks)
+      : await runner.runMany(list, { includeHuman: $('#optHuman').checked, includeLong: $('#optLong').checked, ...hooks });
+    toast(`Selesai: ${sum.pass} lulus, ${sum.fail} gagal, ${sum.skip} dilewati${sum.manual ? `, ${sum.manual} manual/tidak dijalankan` : ''}`);
+  } catch (e) { toast(e.message, true); }
 }
 
 // ------------------------------------------------------------------ hasil
@@ -399,7 +261,7 @@ function renderTable() {
       h('h4', {}, `${sec.id} ${sec.title}`),
       h('span', { class: 'muted small' }, `${rows.length} uji · ${autoRows.length} otomatis`),
       h('span', { class: 'grow' }),
-      autoRows.length ? h('button', { class: 'btn sm', onclick: () => runMany(autoRows) }, '▶ Jalankan bagian') : null,
+      autoRows.length ? h('button', { class: 'btn sm', onclick: () => runList(autoRows) }, '▶ Jalankan bagian') : null,
       sec.note ? h('div', { class: 'note' }, resolvePh(sec.note)) : null,
     );
     const table = h('table', { class: 'tt' },
@@ -422,10 +284,17 @@ function renderRow(tc) {
   return h('tr', { 'data-id': tc.id },
     h('td', { class: 'id', 'data-l': 'ID' }, tc.id),
     h('td', { class: 'pr' }, tc.prio ? '★' : ''),
-    h('td', { class: 'name', 'data-l': 'Uji' }, tc.name, h('div', { class: 'acts' }, isServerTest(tc) ? h('span', { class: 'badge srv' }, 'server') : null, tc.run ? h('span', { class: 'badge auto' }, 'otomatis') : h('span', { class: 'badge' }, 'manual'))),
+    h('td', { class: 'name', 'data-l': 'Uji' }, tc.name,
+      h('div', { class: 'acts' },
+        tc.needs ? h('span', { class: 'badge srv', title: tc.needs === 'net' ? 'Butuh Wi-Fi + internet (disambungkan otomatis)' : 'Butuh Wi-Fi (disambungkan otomatis)' }, tc.needs === 'net' ? 'internet' : 'wi-fi') : null,
+        tc.run ? h('span', { class: 'badge auto' }, 'otomatis') : h('span', { class: 'badge' }, 'manual'),
+        tc.human ? h('span', { class: 'badge human', title: tc.human }, 'butuh tindakan') : null,
+        tc.long ? h('span', { class: 'badge long' }, 'panjang') : null),
+      tc.requires?.length ? h('div', { class: 'req', title: tc.requires.map((id) => `${id} ${testById(id)?.name || ''}`).join('\n') }, 'prasyarat: ' + tc.requires.join(', ')) : null,
+      tc.human ? h('div', { class: 'req' }, '⚑ ' + tc.human) : null),
     h('td', { 'data-l': 'Perintah / langkah' }, pre, h('div', { class: 'acts' },
       h('button', { class: 'btn ghost sm', onclick: () => copy(pre.textContent) }, 'Salin'),
-      tc.run ? h('button', { class: 'btn sm', onclick: () => runMany([tc]) }, '▶ Jalankan') : null)),
+      tc.run ? h('button', { class: 'btn sm', onclick: () => runList([tc], true) }, '▶ Jalankan') : null)),
     h('td', { 'data-l': 'Hasil diharapkan' }, resolvePh(tc.exp)),
     h('td', { class: 'note', 'data-l': 'Catatan' }, resolvePh(tc.note || '')),
     h('td', { 'data-l': 'Status' }, sel),
@@ -469,13 +338,15 @@ function renderRuns() {
 }
 function renderChips() {
   if (!S) return;
-  const chip = (cls, text) => h('span', { class: 'chip ' + cls }, text);
+  const chip = (cls, text, title) => h('span', { class: 'chip ' + cls, title }, text);
   const b = S.brokers || {};
+  const brokerName = { own: 'Broker MQTT server', mosquitto: 'Broker publik Mosquitto', emqx: 'Broker publik EMQX' };
+  const ok = (k) => b[k]?.status === 'tersambung';
   $('#chips').replaceChildren(
-    chip(S.testMode ? 'ok' : 'bad', S.testMode ? 'mode uji aktif' : 'mode uji mati'),
-    chip(serial.connected ? 'ok' : 'warn', serial.connected ? 'serial terhubung' : 'serial belum'),
-    ...Object.entries(b).map(([k, v]) => chip(v.status === 'tersambung' ? 'ok' : 'bad', `${k === 'own' ? 'broker sendiri' : v.label}`)),
-    chip('', S.topic),
+    chip(serial.connected ? 'ok' : 'warn', serial.connected ? 'ESP: terhubung' : 'ESP: belum terhubung', 'Koneksi Web Serial ke ESP di laptop ini'),
+    chip(S.testMode ? 'ok' : 'bad', S.testMode ? 'Endpoint uji: aktif' : 'Endpoint uji: dimatikan', 'Endpoint /t, /ws, /mqtt, /ota yang dihubungi ESP'),
+    ...Object.keys(brokerName).filter((k) => b[k]).map((k) => chip(ok(k) ? 'ok' : 'bad', `${brokerName[k]}: ${ok(k) ? 'siap' : 'terputus'}`, `Dashboard ${ok(k) ? 'tersambung ke' : 'tidak tersambung ke'} ${b[k].label} untuk memantau topik ${S.topic}/#`)),
+    chip('', `Topik: ${S.topic}`, 'Awalan topik MQTT milikmu'),
   );
 }
 
@@ -571,7 +442,13 @@ function fillControlForms() {
   $('#testMode').disabled = S.user.kind !== 'admin';
   const c = S.settings.custom;
   $('#cStatus').value = c.status; $('#cDelay').value = c.delayMs; $('#cType').value = c.contentType; $('#cHeaders').value = c.headers; $('#cBody').value = c.body;
-  $('#sSsid').value = S.settings.ssid || ''; $('#sPass').value = S.settings.wifiPass || '';
+  const st = S.settings;
+  $('#pSsid').value = st.ssid || ''; $('#pPass').value = st.wifiPass || '';
+  $('#pBtName').value = st.btName || ''; $('#pBtPin').value = st.btPin || '';
+  $('#pApSsid').value = st.apSsid || ''; $('#pApPass').value = st.apPass || ''; $('#pApCh').value = st.apCh || 6;
+  $('#pBleName').value = st.bleName || ''; $('#pMdns').value = st.mdnsName || '';
+  $('#pAutoWifi').checked = st.autoWifi !== false;
+  if (st.ssid) $('#params').open = false;
   $('#otaAbort').value = String(S.settings.otaAbortPct || 0);
   $('#mqttInfo').replaceChildren(
     h('dt', {}, 'URL'), h('dd', {}, `wss://${S.host}:443/mqtt`),
@@ -698,7 +575,8 @@ function bind() {
     try { await serial.sendLine(v); $('#serialInput').value = ''; } catch (err) { toast(err.message, true); }
   };
   $('#serialClear').onclick = () => slog().replaceChildren();
-  $('#stopRun').onclick = () => { runner.abort = true; };
+  $('#stopRun').onclick = () => runner.abort();
+  $('#runAll').onclick = () => runList(S.tests.filter((tc) => tc.run));
   const quick = ['AT', 'AT+GMR', 'AT+RST', 'AT+SYSRAM?', 'AT+CIFSR', 'AT+CIPSTATUS', 'AT+MQTTCONN?', 'AT+CIPCLOSE', 'ATE1'];
   $('#quick').replaceChildren(...quick.map((q) => h('button', { class: 'btn ghost', onclick: () => serial.sendLine(q).catch((e) => toast(e.message, true)) }, q)),
     h('button', { class: 'btn ghost', title: 'Kirim +++ tanpa CR LF (keluar passthrough)', onclick: () => serial.sendRaw(enc.encode('+++')).catch((e) => toast(e.message, true)) }, '+++'));
@@ -723,8 +601,17 @@ function bind() {
     } catch (e) { toast(e.message, true); }
   };
   $('#cSave').onclick = () => saveSettings({ custom: { status: Number($('#cStatus').value), delayMs: Number($('#cDelay').value), contentType: $('#cType').value, headers: $('#cHeaders').value, body: $('#cBody').value } }, 'Respons custom disimpan');
-  $('#sSave').onclick = async () => {
-    try { await saveSettings({ ssid: $('#sSsid').value, wifiPass: $('#sPass').value }); fillControlForms(); renderTable(); } catch (e) { toast(e.message, true); }
+  $('#pSave').onclick = async () => {
+    const apPass = $('#pApPass').value;
+    if (apPass && apPass.length < 8) return toast('Password hotspot minimal 8 karakter (WPA2)', true);
+    try {
+      await saveSettings({
+        ssid: $('#pSsid').value, wifiPass: $('#pPass').value, btName: $('#pBtName').value, btPin: $('#pBtPin').value,
+        apSsid: $('#pApSsid').value, apPass, apCh: Number($('#pApCh').value), bleName: $('#pBleName').value,
+        mdnsName: $('#pMdns').value, autoWifi: $('#pAutoWifi').checked,
+      }, 'Parameter uji disimpan');
+      renderTable();
+    } catch (e) { toast(e.message, true); }
   };
 
   // OTA

@@ -47,6 +47,31 @@
         <label class="inline chk"><input type="checkbox" id="serverOnly"> Hanya terkait server</label>
       </div>
       <div class="guestbar" id="guestbar" hidden></div>
+      <details class="card params" id="params" open>
+        <summary><h3>Parameter uji</h3><span class="muted small">dipakai di semua perintah AT, mis. AT+CWJAP="{SSID}"</span></summary>
+        <div class="pgrid">
+          <label>Wi-Fi SSID<input id="pSsid" autocomplete="off" spellcheck="false" placeholder="nama Wi-Fi untuk ESP"></label>
+          <label>Wi-Fi password<input id="pPass" type="password" autocomplete="new-password" spellcheck="false"></label>
+          <label>Nama Bluetooth<input id="pBtName" maxlength="32" spellcheck="false"></label>
+          <label>PIN Bluetooth<input id="pBtPin" maxlength="16" spellcheck="false"></label>
+          <label>SSID hotspot ESP<input id="pApSsid" maxlength="32" spellcheck="false"></label>
+          <label>Password hotspot<input id="pApPass" minlength="8" maxlength="63" spellcheck="false"></label>
+          <label>Kanal hotspot<input id="pApCh" type="number" min="1" max="13"></label>
+          <label>Nama BLE<input id="pBleName" maxlength="29" spellcheck="false"></label>
+          <label>Nama mDNS<input id="pMdns" maxlength="32" spellcheck="false"></label>
+        </div>
+        <div class="row">
+          <label class="inline chk"><input type="checkbox" id="pAutoWifi"> Sambungkan Wi-Fi otomatis sebelum uji yang butuh internet</label>
+          <span class="grow"></span>
+          <button class="btn primary sm" id="pSave">Simpan parameter</button>
+        </div>
+      </details>
+      <div class="runall card">
+        <button class="btn primary" id="runAll">▶ Jalankan semua uji otomatis</button>
+        <label class="inline chk"><input type="checkbox" id="optHuman"> Sertakan uji yang butuh tindakan (HP, tombol, dll.)</label>
+        <label class="inline chk"><input type="checkbox" id="optLong"> Sertakan uji panjang (&gt; 1 menit)</label>
+        <span class="muted small">Uji yang prasyaratnya gagal otomatis dilewati. ESP harus terhubung di panel kanan.</span>
+      </div>
       <div class="summary" id="summary"></div>
       <div id="testTable"></div>
     </section>
@@ -135,14 +160,6 @@
     <section class="panel" id="tab-settings">
       <div class="grid2">
         <div class="card">
-          <h3>Wi-Fi ESP (untuk placeholder {SSID} / {PASS})</h3>
-          <div class="form">
-            <label>SSID<input id="sSsid" autocomplete="off"></label>
-            <label>Password Wi-Fi<input id="sPass" type="password" autocomplete="new-password"></label>
-            <button class="btn primary sm" id="sSave">Simpan</button>
-          </div>
-        </div>
-        <div class="card">
           <h3>Akunmu</h3>
           <dl class="kv" id="userInfo"></dl>
         </div>
@@ -201,6 +218,7 @@
 </div>
 
 <div class="toast" id="toast" role="status"></div>
+<script src="/assets/runner.js"></script>
 <script src="/assets/app.js"></script>
 </body>
 </html>

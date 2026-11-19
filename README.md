@@ -11,9 +11,15 @@ ESP tidak perlu satu jaringan dengan server. Semua lalu lintas lewat Cloudflare 
   Data tamu hanya di memori: hilang saat server restart atau tidak dipakai lebih dari 24 jam.
   Kode tamu bisa dipakai untuk masuk lagi dari perangkat lain.
 - **Admin**: data tersimpan di disk, bisa mengatur mode uji dan melihat daftar tamu aktif.
-- **Tabel uji** (189 uji, 157 bisa otomatis) dengan kolom ID, prioritas, perintah, hasil diharapkan, status, hasil aktual.
+- **Katalog 276 uji dalam 20 bagian** (dasar, deteksi fitur, Wi-Fi, SNTP/DNS, TCP/SSL, UDP, sertifikat, MQTT,
+  HTTP, WebSocket, mDNS, hemat daya, hotspot, BLE, BT Classic, BT+hotspot, sistem berkas, OTA, perintah lama, ketahanan).
+- **Parameter uji** yang bisa diubah: SSID/password Wi-Fi, nama/PIN Bluetooth, SSID/password/kanal hotspot, nama BLE, mDNS.
 - **Runner otomatis lewat Web Serial** (Chrome/Edge): mengirim AT ke ESP yang dicolok ke laptop,
   mencocokkan balasan serial dan bukti di server, lalu mengisi Lulus/Gagal.
+  - Sebelum uji yang butuh internet, runner memastikan ESP menjawab, Wi-Fi tersambung (menyambung ulang bila perlu), dan DNS jalan.
+  - **Deteksi fitur**: bila `AT+CMD?` tidak memuat sebuah fitur, uji yang bergantung padanya otomatis Lewati.
+  - Langkah persiapan membersihkan sisa koneksi; restart/crash ESP terdeteksi dan dicatat.
+  - "Jalankan semua" melewati uji yang butuh tindakan orang (HP, tombol) dan uji panjang, kecuali dipilih.
 - **Kontrol server**: kirim teks ke koneksi TCP tertahan atau klien WebSocket, publish MQTT ke ESP, respons HTTP custom.
 - **OTA**: upload `.bin`, cek magic/ukuran partisi, file rusak, putus unduhan di persentase tertentu.
 - **Laporan**: halaman laporan siap cetak/PDF (ringkasan per bagian, daftar gagal, detail) dan ekspor CSV, per putaran.
@@ -70,12 +76,24 @@ Yang tidak bisa lewat tunnel memakai server publik: `test.mosquitto.org` (MQTT 1
 4. Tab **Pengujian**: **▶ Jalankan** per uji atau per bagian. Uji manual (HP, Bluetooth) diisi sendiri.
 5. Klik **Laporan** → Cetak / Simpan PDF.
 
+## Menguji runner tanpa perangkat
+
+`app/test/sim-esp.mjs` meniru firmware ESP-AT (termasuk perilaku khas seperti `+UART_CUR:115201`,
+`+CWJAP:2` diikuti `ERROR`, "busy p...", dan crash "Will force to restart").
+
+```bash
+docker run --rm -v "$PWD/app:/app" -w /app node:24-alpine node test/runner.test.mjs   # skenario utama
+docker run --rm -v "$PWD/app:/app" -w /app node:24-alpine node test/run-all.sim.mjs   # seluruh katalog
+```
+
 ## Struktur
 
 ```
 app/src/server.js     server HTTP, endpoint uji, WS, proxy MQTT, OTA, laporan, akun tamu
 app/src/tests.js      katalog uji + skrip runner
 app/public/           dashboard (HTML/CSS/JS tanpa build step)
+app/public/assets/runner.js   inti runner (tanpa DOM, dipakai browser dan uji Node)
+app/test/             simulator ESP-AT dan uji runner
 app/certs/            CA publik (ISRG, GTS, mosquitto.org) untuk diisi ke ESP
 mosquitto/            konfigurasi broker (dynamic security)
 ```
