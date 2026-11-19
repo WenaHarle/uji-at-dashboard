@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uji AT Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="brand-mark">&gt;_</span> Uji AT Dashboard</div>
+  <div class="chips" id="chips"></div>
+  <span class="who" id="who"></span>
+  <button class="btn ghost sm" id="logout">Keluar</button>
+</header>
+
+<div class="layout">
+  <main class="main">
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="tests">Pengujian</button>
+      <button class="tab" data-tab="control">Kontrol Server</button>
+      <button class="tab" data-tab="ota">OTA</button>
+      <button class="tab" data-tab="certs">Sertifikat</button>
+      <button class="tab" data-tab="settings">Pengaturan</button>
+    </nav>
+
+    <!-- Pengujian -->
+    <section class="panel active" id="tab-tests">
+      <div class="toolbar">
+        <label class="inline">Putaran
+          <select id="runSel"></select>
+        </label>
+        <button class="btn sm" id="newRun">+ Putaran baru</button>
+        <a class="btn sm primary" id="report" href="/api/report.html" target="_blank" rel="noopener">Laporan</a>
+        <a class="btn sm" id="reportTested" href="/api/report.html?only=tested" target="_blank" rel="noopener">Laporan (yang diuji)</a>
+        <a class="btn sm" id="exportCsv" href="/api/export.csv">CSV</a>
+        <span class="grow"></span>
+        <input id="search" type="search" placeholder="Cari ID / uji / perintah…">
+        <select id="secFilter"><option value="">Semua bagian</option></select>
+        <select id="statusFilter">
+          <option value="">Semua status</option>
+          <option>Belum diuji</option><option>Lulus</option><option>Gagal</option><option>Lewati</option>
+        </select>
+        <label class="inline chk"><input type="checkbox" id="serverOnly"> Hanya terkait server</label>
+      </div>
+      <div class="guestbar" id="guestbar" hidden></div>
+      <div class="summary" id="summary"></div>
+      <div id="testTable"></div>
+    </section>
+
+    <!-- Kontrol -->
+    <section class="panel" id="tab-control">
+      <div class="grid2">
+        <div class="card">
+          <h3>Mode uji</h3>
+          <p class="muted">Saat mati, semua endpoint ESP (/t, /ws, /mqtt, /ota) membalas 503. Hanya admin yang bisa mengubah.</p>
+          <label class="switch"><input type="checkbox" id="testMode"><span>Endpoint ESP aktif</span></label>
+          <div id="adminGuests" class="admin-only" hidden></div>
+        </div>
+        <div class="card">
+          <h3>Koneksi TCP tertahan (/t/hold)</h3>
+          <p class="muted">ESP membuka TCP/SSL lalu mengirim <code>GET /t/hold</code>. Dari sini server bisa membalas teks (T-05) atau memutus (T-12).</p>
+          <div id="holdList" class="connlist"></div>
+          <div class="row"><input id="holdText" value="Halo dari server UJIAT"><button class="btn primary sm" id="holdPush">Kirim ke hold</button><button class="btn danger sm" id="holdClose">Tutup semua</button></div>
+        </div>
+        <div class="card">
+          <h3>Klien WebSocket (/ws)</h3>
+          <div id="wsList" class="connlist"></div>
+          <div class="row"><input id="wsText" value="Halo dari server"><button class="btn primary sm" id="wsPush">Kirim ke WS</button><button class="btn danger sm" id="wsClose">Tutup WS</button></div>
+        </div>
+        <div class="card">
+          <h3>Publish MQTT ke ESP</h3>
+          <div class="form">
+            <label>Broker<select id="pubBroker"><option value="own">Broker sendiri (wss://…/mqtt)</option><option value="mosquitto">test.mosquitto.org</option><option value="emqx">broker.emqx.io</option></select></label>
+            <label>Topik<input id="pubTopic" value="{TOPIC}/down"></label>
+            <label>Payload<input id="pubPayload" value="halo-esp"></label>
+            <div class="row"><label class="inline">QoS <select id="pubQos"><option>0</option><option selected>1</option><option>2</option></select></label><label class="inline chk"><input type="checkbox" id="pubRetain"> Retain</label><button class="btn primary sm" id="pubBtn">Publish</button></div>
+          </div>
+          <div id="brokerStatus" class="muted small"></div>
+        </div>
+        <div class="card">
+          <h3>Respons custom (/t/custom)</h3>
+          <div class="form">
+            <div class="row"><label class="inline">Status <input id="cStatus" type="number" min="100" max="599" class="w80"></label><label class="inline">Delay ms <input id="cDelay" type="number" min="0" max="90000" class="w100"></label></div>
+            <label>Content-Type<input id="cType"></label>
+            <label>Header tambahan (satu per baris, <code>Nama: nilai</code>)<textarea id="cHeaders" rows="2"></textarea></label>
+            <label>Body<textarea id="cBody" rows="3"></textarea></label>
+            <button class="btn primary sm" id="cSave">Simpan</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Daftar endpoint untuk ESP</h3>
+          <div id="endpoints" class="endpoints"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- OTA -->
+    <section class="panel" id="tab-ota">
+      <div class="grid2">
+        <div class="card">
+          <h3>Upload firmware</h3>
+          <p class="muted">Pakai <code>esp-at.bin</code> (aplikasi, bukan factory/merged). Batas partisi OTA: <b id="otaPart"></b> byte.</p>
+          <div class="row"><input type="file" id="otaFile" accept=".bin"><button class="btn primary sm" id="otaUpload">Upload</button></div>
+          <div id="otaMsg" class="muted small"></div>
+        </div>
+        <div class="card">
+          <h3>Skenario gagal</h3>
+          <div class="row"><button class="btn sm" id="otaBad">Buat rusak.bin (200 KB acak)</button></div>
+          <label class="inline">Putus unduhan di
+            <select id="otaAbort"><option value="0">0% (normal)</option><option value="10">10%</option><option value="50">50%</option><option value="90">90%</option></select>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <h3>File OTA</h3>
+        <div id="otaList"></div>
+      </div>
+    </section>
+
+    <!-- Sertifikat -->
+    <section class="panel" id="tab-certs">
+      <div class="card">
+        <h3>Sertifikat untuk ESP</h3>
+        <p class="muted">Tulis ke ESP dengan <code>AT+SYSMFG</code> (tes S-02 sampai S-05 bisa mengirim PEM otomatis lewat Web Serial). Panjang byte di bawah sudah tepat untuk <code>&lt;value_len&gt;</code>.</p>
+        <div class="row"><button class="btn primary sm" id="genClient">Buat client cert (ditandatangani test.mosquitto.org)</button><span id="genMsg" class="muted small"></span></div>
+      </div>
+      <div id="certList"></div>
+    </section>
+
+    <!-- Pengaturan -->
+    <section class="panel" id="tab-settings">
+      <div class="grid2">
+        <div class="card">
+          <h3>Wi-Fi ESP (untuk placeholder {SSID} / {PASS})</h3>
+          <div class="form">
+            <label>SSID<input id="sSsid" autocomplete="off"></label>
+            <label>Password Wi-Fi<input id="sPass" type="password" autocomplete="new-password"></label>
+            <button class="btn primary sm" id="sSave">Simpan</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Akunmu</h3>
+          <dl class="kv" id="userInfo"></dl>
+        </div>
+        <div class="card">
+          <h3>Akun MQTT untuk ESP (broker sendiri)</h3>
+          <dl class="kv" id="mqttInfo"></dl>
+        </div>
+        <div class="card span2 admin-only" hidden>
+          <h3>Pengaturan Cloudflare yang dibutuhkan</h3>
+          <ol class="steps">
+            <li>Zero Trust → Networks → Tunnels → tunnel-mu → <b>Public Hostname</b>: <code>ujiat.madewena.com</code> → HTTP → <code>localhost:8900</code>.</li>
+            <li>Rules → <b>Configuration Rules</b>: bila hostname <code>ujiat.madewena.com</code> dan path diawali <code>/t/</code>, <code>/ws</code>, <code>/mqtt</code>, atau <code>/ota/</code> → <b>Automatic HTTPS Rewrites</b> off, <b>Always Use HTTPS</b> off (agar tes http:// dan TCP port 80 jalan), <b>Browser Integrity Check</b> off.</li>
+            <li>Security → Bots: pastikan <b>Bot Fight Mode</b> mati (di paket gratis tidak bisa dikecualikan per path).</li>
+            <li>Network: <b>WebSockets</b> on (bawaan on).</li>
+            <li>Cloudflare memutus WebSocket diam ±100 detik → keepalive MQTT ≤ 60 detik (lihat M-12).</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="dock">
+    <div class="dock-panel" id="serialPanel">
+      <div class="dock-head">
+        <b>Serial ESP (Web Serial)</b>
+        <span class="grow"></span>
+        <select id="baud" class="sm"><option>115200</option><option>921600</option><option>460800</option><option>230400</option><option>57600</option><option>9600</option></select>
+        <button class="btn primary sm" id="serialBtn">Hubungkan</button>
+      </div>
+      <div class="runner" id="runner" hidden>
+        <span id="runnerText"></span><span class="grow"></span><button class="btn danger sm" id="stopRun">Stop</button>
+      </div>
+      <pre class="log" id="serialLog" aria-live="polite"></pre>
+      <div class="dock-foot">
+        <div class="quick" id="quick"></div>
+        <form class="row" id="serialForm">
+          <input id="serialInput" placeholder="Ketik AT… (Enter = kirim + CR LF)" autocomplete="off" spellcheck="false">
+          <button class="btn sm" type="submit">Kirim</button>
+          <button class="btn ghost sm" type="button" id="serialClear">Bersihkan</button>
+        </form>
+        <p class="muted small" id="serialHint"></p>
+      </div>
+    </div>
+    <div class="dock-panel" id="eventPanel">
+      <div class="dock-head">
+        <b>Log server (live)</b>
+        <span class="grow"></span>
+        <select id="evFilter" class="sm">
+          <option value="">Semua</option><option value="http">HTTP</option><option value="hold|sink">TCP hold/sink</option><option value="mqtt">MQTT</option><option value="ws">WebSocket</option><option value="ota">OTA</option>
+        </select>
+        <button class="btn ghost sm" id="evClear">Bersihkan</button>
+      </div>
+      <div class="log evlog" id="evLog"></div>
+    </div>
+  </aside>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="/assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Masuk · Uji AT Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <div class="brand brand-lg"><span class="brand-mark">&gt;_</span> Uji AT Dashboard</div>
+    <p class="muted">Uji perintah AT ESP32 (ESP-AT) ke server sungguhan lewat internet: TCP/SSL, HTTP, MQTT, WebSocket, OTA. Gratis, tanpa daftar.</p>
+
+    <form id="guest" class="login-form">
+      <label>Nama (opsional)<input name="name" maxlength="40" placeholder="mis. Budi / Tim Firmware" autocomplete="nickname"></label>
+      <button class="btn primary" type="submit">Mulai sebagai tamu</button>
+      <p class="muted small">Kamu mendapat ID unik, endpoint, dan akun MQTT sendiri. Data tamu hanya disimpan di memori: hilang bila server restart atau tidak dipakai lebih dari 24 jam. Ekspor laporanmu sebelum selesai.</p>
+    </form>
+
+    <details class="login-more">
+      <summary>Punya kode tamu?</summary>
+      <form id="resume" class="login-form">
+        <label>Kode tamu<input name="code" placeholder="abc123-xxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false"></label>
+        <button class="btn" type="submit">Lanjutkan</button>
+      </form>
+    </details>
+
+    <details class="login-more">
+      <summary>Masuk admin</summary>
+      <form id="admin" class="login-form" autocomplete="on">
+        <label>Username<input name="user" autocomplete="username"></label>
+        <label>Password<input name="pass" type="password" autocomplete="current-password"></label>
+        <button class="btn" type="submit">Masuk</button>
+      </form>
+    </details>
+    <p id="err" class="err" role="alert"></p>
+  </main>
+  <script src="/assets/login.js"></script>
+</body>
+</html>

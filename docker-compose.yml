@@ -1,0 +1,34 @@
+name: ujiat
+
+services:
+  app:
+    build: ./app
+    container_name: ujiat-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MQTT_HOST: mqtt
+      DATA_DIR: /data
+    ports:
+      # Hanya untuk cloudflared di host ini -> ujiat.madewena.com
+      - "127.0.0.1:8900:8900"
+    volumes:
+      - ujiat-data:/data
+    depends_on:
+      - mqtt
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: ujiat-mqtt
+    restart: unless-stopped
+    env_file: .env
+    entrypoint: ["/bin/sh", "/mosquitto/config/entrypoint.sh"]
+    # Tidak ada port yang dipublikasikan: hanya dijangkau dari app (proxy /mqtt).
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/entrypoint.sh:/mosquitto/config/entrypoint.sh:ro
+      - ujiat-mqtt:/mosquitto/data
+
+volumes:
+  ujiat-data:
+  ujiat-mqtt:

@@ -1,0 +1,12 @@
+{
+  "name": "ujiat-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Uji AT Dashboard - server pasangan untuk menguji ESP-AT (ESP32-WROOM-32)",
+  "main": "src/server.js",
+  "dependencies": {
+    "mqtt": "5.10.4",
+    "ws": "8.18.0"
+  }
+}
